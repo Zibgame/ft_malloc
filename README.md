@@ -1,2 +1,74 @@
 # ft_malloc
-A custom memory allocator written in C++, designed to replace standard libc allocation functions, with efficient memory management, reduced fragmentation, and low-level performance optimizations.
+
+A small dynamic memory allocator written in C++ for the 42 `malloc` project.
+It provides replacements for `malloc`, `free`, and `realloc` using only
+page-backed memory obtained through `mmap`.
+
+## Features
+
+- Aligned allocations suitable for standard C and C++ types
+- `TINY`, `SMALL`, and `LARGE` allocation classes
+- Preallocated `TINY` and `SMALL` zones with room for at least 100 blocks
+- Reuse and coalescing of adjacent free blocks
+- Dedicated mappings for `LARGE` allocations
+- Allocation inspection through `show_alloc_mem()`
+- Overflow checks for size and page-rounding calculations
+
+## Allocation classes
+
+| Class | Requested size | Strategy |
+| --- | ---: | --- |
+| `TINY` | 1–128 bytes | Shared preallocated zone |
+| `SMALL` | 129–1024 bytes | Shared preallocated zone |
+| `LARGE` | More than 1024 bytes | Dedicated `mmap` mapping |
+
+Each allocated block is preceded by an aligned header containing its capacity,
+requested size, state, class, and a link to the next block.
+
+```text
+[ header ][ user memory ][ header ][ user memory ] ...
+```
+
+## Build
+
+```sh
+make
+```
+
+The build creates the host-specific library required by the subject and a
+portable symbolic link:
+
+```text
+libft_malloc_<HOSTTYPE>.so
+libft_malloc.so -> libft_malloc_<HOSTTYPE>.so
+```
+
+## Test
+
+```sh
+make test
+```
+
+The test suite checks alignment, allocation classes, `realloc` data
+preservation, zero-size behavior, more than 100 allocations per shared class,
+and the output path of `show_alloc_mem()`.
+
+The allocator can also be injected into another program:
+
+```sh
+LD_PRELOAD="$PWD/libft_malloc.so" ./your_program
+```
+
+## Public API
+
+```cpp
+void  *malloc(std::size_t size) noexcept;
+void   free(void *ptr) noexcept;
+void  *realloc(void *ptr, std::size_t size) noexcept;
+void   show_alloc_mem() noexcept;
+```
+
+## Current scope
+
+The mandatory allocation behavior is implemented. Thread safety and extended
+debug output such as `show_alloc_mem_ex()` are not included yet.

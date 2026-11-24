@@ -11,11 +11,22 @@
 /* ************************************************************************** */
 
 #include "malloc.h"
-#include <sys/mman.h>
 
 extern "C" void	free(void *ptr) noexcept
 {
+	t_header_info	*header;
+
 	if (ptr == nullptr)
 		return ;
-	munmap(get_header_pos(ptr), sizeof(t_header_info) + get_header_size(ptr));
+
+	if (is_header_free(ptr))
+		return ;
+
+	header = get_header(ptr);
+	if (release_large_header(header))
+		return ;
+
+	header->is_free = true;
+	header->requested_size = 0;
+	merge_free_headers();
 }
