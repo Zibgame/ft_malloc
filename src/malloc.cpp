@@ -6,17 +6,32 @@
 /*   By: zcadinot <zcadinot@student.42lehavre.      +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/11/24 15:27:44 by zcadinot          #+#    #+#             */
-/*   Updated: 2026/11/25 13:25:36 by zcadinot         ###   ########.fr       */
+/*   Updated: 2026/11/25 13:33:06 by zcadinot         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "malloc_internal.h"
+#include <cstdlib>
 #include <pthread.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
-static t_header_info	*g_first_header = nullptr;
-static pthread_mutex_t	g_malloc_mutex = PTHREAD_MUTEX_INITIALIZER;
+typedef struct s_allocator_state
+{
+	t_header_info		*header;
+	pthread_mutex_t		mutex;
+	t_history_event		history[256];
+	std::size_t			history_count;
+	std::size_t			history_next;
+	std::size_t			next_event_id;
+	bool				options_initialized;
+	bool				debug_enabled;
+	bool				scribble_enabled;
+} t_allocator_state;
+
+static t_allocator_state	g_state = {
+	nullptr, PTHREAD_MUTEX_INITIALIZER, {}, 0, 0, 1, false, false, false
+};
 
 static const std::size_t	TINY_MAX = 128;
 static const std::size_t	SMALL_MAX = 1024;
@@ -24,17 +39,102 @@ static const std::size_t	BLOCKS_PER_ZONE = 100;
 
 void	lock_allocator()
 {
-	pthread_mutex_lock(&g_malloc_mutex);
+	pthread_mutex_lock(&g_state.mutex);
 }
 
 void	unlock_allocator()
 {
-	pthread_mutex_unlock(&g_malloc_mutex);
+	pthread_mutex_unlock(&g_state.mutex);
 }
 
 t_header_info	*get_first_header()
 {
-	return (g_first_header);
+	return (g_state.header);
+}
+
+static bool	environment_enabled(const char *name)
+{
+	const char	*value;
+
+	value = std::getenv(name);
+	if (value == nullptr || value[0] == '\0')
+		return (false);
+
+	return (!(value[0] == '0' && value[1] == '\0'));
+}
+
+void	initialize_debug_options()
+{
+	if (g_state.options_initialized)
+		return ;
+
+	g_state.debug_enabled = environment_enabled("FT_MALLOC_DEBUG");
+	g_state.scribble_enabled = environment_enabled("FT_MALLOC_SCRIBBLE");
+	g_state.options_initialized = true;
+}
+
+bool	is_debug_enabled()
+{
+	return (g_state.debug_enabled);
+}
+
+bool	is_scribble_enabled()
+{
+	return (g_state.scribble_enabled);
+}
+
+void	scribble_memory(void *ptr, std::size_t size, unsigned char value)
+{
+	unsigned char	*memory;
+	std::size_t		i;
+
+	memory = static_cast<unsigned char *>(ptr);
+	i = 0;
+	while (i < size)
+	{
+		memory[i] = value;
+		i++;
+	}
+}
+
+void	record_history(t_history_action action, void *ptr,
+	void *old_ptr, std::size_t size, t_zone_type type)
+{
+	t_history_event	*event;
+
+	event = &g_state.history[g_state.history_next];
+	event->id = g_state.next_event_id++;
+	event->action = action;
+	event->ptr = ptr;
+	event->old_ptr = old_ptr;
+	event->size = size;
+	event->type = type;
+	g_state.history_next = (g_state.history_next + 1) % 256;
+	if (g_state.history_count < 256)
+		g_state.history_count++;
+
+	if (g_state.debug_enabled)
+		write_debug_event(event);
+}
+
+std::size_t	get_history_count()
+{
+	return (g_state.history_count);
+}
+
+const t_history_event	*get_history_event(std::size_t index)
+{
+	std::size_t	first;
+	std::size_t	position;
+
+	if (index >= g_state.history_count)
+		return (nullptr);
+
+	first = 0;
+	if (g_state.history_count == 256)
+		first = g_state.history_next;
+	position = (first + index) % 256;
+	return (&g_state.history[position]);
 }
 
 void	merge_free_headers()
@@ -42,7 +142,7 @@ void	merge_free_headers()
 	t_header_info	*header;
 	char			*end;
 
-	header = g_first_header;
+	header = g_state.header;
 	while (header != nullptr && header->next != nullptr)
 	{
 		end = reinterpret_cast<char *>(header + 1) + header->size;
@@ -135,9 +235,9 @@ static t_header_info	*allocate_zone(std::size_t size, t_zone_type type)
 	header->mapping_size = mapping_size;
 	header->is_free = true;
 	header->type = type;
-	header->next = g_first_header;
+	header->next = g_state.header;
 	header->zone = header;
-	g_first_header = header;
+	g_state.header = header;
 	return (header);
 }
 
@@ -145,7 +245,7 @@ static t_header_info	*find_free_header(std::size_t size, t_zone_type type)
 {
 	t_header_info	*header;
 
-	header = g_first_header;
+	header = g_state.header;
 	while (header != nullptr)
 	{
 		if (header->is_free && header->type == type && header->size >= size)
@@ -191,7 +291,7 @@ bool	release_large_header(t_header_info *header)
 	if (header->type != LARGE)
 		return (false);
 
-	current = g_first_header;
+	current = g_state.header;
 	previous = nullptr;
 	while (current != nullptr && current != header)
 	{
@@ -202,7 +302,7 @@ bool	release_large_header(t_header_info *header)
 		return (false);
 
 	if (previous == nullptr)
-		g_first_header = current->next;
+		g_state.header = current->next;
 	else
 		previous->next = current->next;
 
@@ -215,7 +315,7 @@ static std::size_t	count_zones(t_zone_type type)
 	t_header_info	*header;
 	std::size_t	count;
 
-	header = g_first_header;
+	header = g_state.header;
 	count = 0;
 	while (header != nullptr)
 	{
@@ -255,7 +355,7 @@ void	release_empty_zone(t_header_info *zone)
 		return ;
 	}
 
-	current = g_first_header;
+	current = g_state.header;
 	previous = nullptr;
 	while (current != nullptr && current != zone)
 	{
@@ -267,7 +367,7 @@ void	release_empty_zone(t_header_info *zone)
 		return ;
 
 	if (previous == nullptr)
-		g_first_header = after_zone;
+		g_state.header = after_zone;
 	else
 		previous->next = after_zone;
 
@@ -316,11 +416,13 @@ extern "C" void	*malloc(std::size_t size) noexcept
 	std::size_t	aligned_size;
 	t_header_info	*header;
 	t_zone_type		type;
+	void			*result;
 
 	if (size == 0)
 		return (nullptr);
 
 	lock_allocator();
+	initialize_debug_options();
 	aligned_size = align_size(size);
 	if (aligned_size == 0)
 	{
@@ -344,6 +446,10 @@ extern "C" void	*malloc(std::size_t size) noexcept
 
 	header->requested_size = size;
 	header->is_free = false;
+	result = header + 1;
+	if (is_scribble_enabled())
+		scribble_memory(result, size, 0xAA);
+	record_history(HISTORY_MALLOC, result, nullptr, size, type);
 	unlock_allocator();
-	return (header + 1);
+	return (result);
 }

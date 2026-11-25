@@ -6,7 +6,7 @@
 /*   By: zcadinot <zcadinot@student.42lehavre.      +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/11/24 15:35:00 by zcadinot          #+#    #+#             */
-/*   Updated: 2026/11/25 13:25:36 by zcadinot         ###   ########.fr       */
+/*   Updated: 2026/11/25 13:33:06 by zcadinot         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -16,11 +16,14 @@ extern "C" void	free(void *ptr) noexcept
 {
 	t_header_info	*header;
 	t_header_info	*zone;
+	std::size_t		size;
+	t_zone_type		type;
 
 	if (ptr == nullptr)
 		return ;
 
 	lock_allocator();
+	initialize_debug_options();
 	if (is_header_free(ptr))
 	{
 		unlock_allocator();
@@ -28,6 +31,11 @@ extern "C" void	free(void *ptr) noexcept
 	}
 
 	header = get_header(ptr);
+	size = header->requested_size;
+	type = header->type;
+	if (is_scribble_enabled())
+		scribble_memory(ptr, size, 0x55);
+	record_history(HISTORY_FREE, ptr, nullptr, size, type);
 	if (release_large_header(header))
 	{
 		unlock_allocator();

@@ -6,7 +6,7 @@
 /*   By: zcadinot <zcadinot@student.42lehavre.      +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/11/24 15:23:15 by zcadinot          #+#    #+#             */
-/*   Updated: 2026/11/25 13:25:36 by zcadinot         ###   ########.fr       */
+/*   Updated: 2026/11/25 13:33:06 by zcadinot         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -222,7 +222,11 @@ int	main()
 	if (tiny == nullptr || small == nullptr || large == nullptr)
 		return (fail("display setup"));
 
+	if (get_history_count() == 0)
+		return (fail("allocation history"));
+
 	show_alloc_mem();
+	show_alloc_mem_ex();
 	free(tiny);
 	free(small);
 	free(large);
