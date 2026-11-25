@@ -1,16 +1,4 @@
-/* ************************************************************************** */
-/*                                                                            */
-/*                                                        :::      ::::::::   */
-/*   malloc.cpp                                         :+:      :+:    :+:   */
-/*                                                    +:+ +:+         +:+     */
-/*   By: zcadinot <zcadinot@student.42lehavre.      +#+  +:+       +#+        */
-/*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/11/24 15:27:44 by zcadinot          #+#    #+#             */
-/*   Updated: 2026/11/24 17:48:02 by zcadinot         ###   ########.fr       */
-/*                                                                            */
-/* ************************************************************************** */
-
-#include "malloc.h"
+#include "malloc_internal.h"
 #include <pthread.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -159,20 +147,25 @@ static t_header_info	*find_free_header(std::size_t size, t_zone_type type)
 
 static void	split_header(t_header_info *header, std::size_t size)
 {
+	t_header_info	*old_next;
 	t_header_info	*next_header;
 	char			*next_position;
 
 	if (header->size < size + sizeof(t_header_info) + alignof(std::max_align_t))
 		return ;
 
+	old_next = header->next;
 	next_position = reinterpret_cast<char *>(header + 1) + size;
 	next_header = reinterpret_cast<t_header_info *>(next_position);
+	if (old_next == next_header)
+		old_next = old_next->next;
+
 	next_header->size = header->size - size - sizeof(t_header_info);
 	next_header->requested_size = 0;
 	next_header->mapping_size = 0;
 	next_header->is_free = true;
 	next_header->type = header->type;
-	next_header->next = header->next;
+	next_header->next = old_next;
 	next_header->zone = header->zone;
 	header->size = size;
 	header->next = next_header;
@@ -225,15 +218,30 @@ static std::size_t	count_zones(t_zone_type type)
 
 void	release_empty_zone(t_header_info *zone)
 {
+	t_header_info	*after_zone;
 	t_header_info	*current;
 	t_header_info	*previous;
 
 	if (zone == nullptr || zone->type == LARGE || !zone->is_free)
 		return ;
 
-	if (zone->size != zone->mapping_size - sizeof(t_header_info)
-		|| count_zones(zone->type) <= 1)
+	current = zone;
+	while (current != nullptr && current->zone == zone)
+	{
+		if (!current->is_free)
+			return ;
+
+		current = current->next;
+	}
+	after_zone = current;
+
+	if (count_zones(zone->type) <= 1)
+	{
+		zone->size = zone->mapping_size - sizeof(t_header_info);
+		zone->requested_size = 0;
+		zone->next = after_zone;
 		return ;
+	}
 
 	current = g_first_header;
 	previous = nullptr;
@@ -247,9 +255,9 @@ void	release_empty_zone(t_header_info *zone)
 		return ;
 
 	if (previous == nullptr)
-		g_first_header = current->next;
+		g_first_header = after_zone;
 	else
-		previous->next = current->next;
+		previous->next = after_zone;
 
 	munmap(current, current->mapping_size);
 }
@@ -263,7 +271,7 @@ bool	resize_header_in_place(void *ptr, std::size_t size)
 
 	header = get_header(ptr);
 	aligned_size = align_size(size);
-	if (aligned_size == 0)
+	if (aligned_size == 0 || get_zone_type(aligned_size) != header->type)
 		return (false);
 
 	if (header->size >= aligned_size)

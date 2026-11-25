@@ -1,16 +1,4 @@
-/* ************************************************************************** */
-/*                                                                            */
-/*                                                        :::      ::::::::   */
-/*   header.cpp                                         :+:      :+:    :+:   */
-/*                                                    +:+ +:+         +:+     */
-/*   By: zcadinot <zcadinot@student.42lehavre.      +#+  +:+       +#+        */
-/*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/11/24 16:30:00 by zcadinot          #+#    #+#             */
-/*   Updated: 2026/11/24 16:28:12 by zcadinot         ###   ########.fr       */
-/*                                                                            */
-/* ************************************************************************** */
-
-#include "malloc.h"
+#include "malloc_internal.h"
 
 void	*put_header(void *ptr, std::size_t size, t_zone_type type)
 {

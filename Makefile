@@ -24,7 +24,7 @@ all: $(LINK)
 test: $(TEST_NAME)
 	./$(TEST_NAME)
 
-$(TEST_NAME): $(TEST_SRC) $(LINK) include/malloc.h
+$(TEST_NAME): $(TEST_SRC) $(LINK) include/malloc.h include/malloc_internal.h
 	$(CXX) $(INCLUDES) $(CXXFLAGS) $(TEST_SRC) -L. -lft_malloc \
 		-Wl,-rpath,'$$ORIGIN' $(LDLIBS) -o $@
 

@@ -32,6 +32,19 @@ requested size, state, class, and a link to the next block.
 [ header ][ user memory ][ header ][ user memory ] ...
 ```
 
+## Project layout
+
+```text
+include/malloc.h           Public API
+include/malloc_internal.h  Allocator structures and internal helpers
+src/malloc.cpp             Allocation and zone management
+src/free.cpp               Block release
+src/realloc.cpp            Block resizing
+src/header.cpp             Header access and coalescing
+src/show.cpp               Allocation display
+test/main.cpp              Complete test scenarios
+```
+
 ## Build
 
 ```sh

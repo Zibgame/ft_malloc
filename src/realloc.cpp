@@ -1,16 +1,4 @@
-/* ************************************************************************** */
-/*                                                                            */
-/*                                                        :::      ::::::::   */
-/*   realloc.cpp                                        :+:      :+:    :+:   */
-/*                                                    +:+ +:+         +:+     */
-/*   By: zcadinot <zcadinot@student.42lehavre.      +#+  +:+       +#+        */
-/*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/11/24 15:35:00 by zcadinot          #+#    #+#             */
-/*   Updated: 2026/11/24 17:52:27 by zcadinot         ###   ########.fr       */
-/*                                                                            */
-/* ************************************************************************** */
-
-#include "malloc.h"
+#include "malloc_internal.h"
 
 extern "C" void	*realloc(void *ptr, std::size_t size) noexcept
 {
