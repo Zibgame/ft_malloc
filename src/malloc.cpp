@@ -11,15 +11,31 @@
 /* ************************************************************************** */
 
 #include "malloc.h"
-#include <cstdint>
+#include <pthread.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
 static t_header_info	*g_first_header = nullptr;
+static pthread_mutex_t	g_malloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static const std::size_t	TINY_MAX = 128;
 static const std::size_t	SMALL_MAX = 1024;
 static const std::size_t	BLOCKS_PER_ZONE = 100;
+
+void	lock_allocator()
+{
+	pthread_mutex_lock(&g_malloc_mutex);
+}
+
+void	unlock_allocator()
+{
+	pthread_mutex_unlock(&g_malloc_mutex);
+}
+
+t_header_info	*get_first_header()
+{
+	return (g_first_header);
+}
 
 void	merge_free_headers()
 {
@@ -32,6 +48,7 @@ void	merge_free_headers()
 		end = reinterpret_cast<char *>(header + 1) + header->size;
 		if (header->is_free && header->next->is_free
 			&& header->type == header->next->type
+			&& header->zone == header->next->zone
 			&& end == reinterpret_cast<char *>(header->next))
 			merge_next_free_header(header);
 		else
@@ -115,9 +132,11 @@ static t_header_info	*allocate_zone(std::size_t size, t_zone_type type)
 	header = static_cast<t_header_info *>(ptr);
 	header->size = mapping_size - sizeof(t_header_info);
 	header->requested_size = 0;
+	header->mapping_size = mapping_size;
 	header->is_free = true;
 	header->type = type;
 	header->next = g_first_header;
+	header->zone = header;
 	g_first_header = header;
 	return (header);
 }
@@ -150,9 +169,11 @@ static void	split_header(t_header_info *header, std::size_t size)
 	next_header = reinterpret_cast<t_header_info *>(next_position);
 	next_header->size = header->size - size - sizeof(t_header_info);
 	next_header->requested_size = 0;
+	next_header->mapping_size = 0;
 	next_header->is_free = true;
 	next_header->type = header->type;
 	next_header->next = header->next;
+	next_header->zone = header->zone;
 	header->size = size;
 	header->next = next_header;
 }
@@ -161,7 +182,6 @@ bool	release_large_header(t_header_info *header)
 {
 	t_header_info	*current;
 	t_header_info	*previous;
-	std::size_t	mapping_size;
 
 	if (header->type != LARGE)
 		return (false);
@@ -181,8 +201,93 @@ bool	release_large_header(t_header_info *header)
 	else
 		previous->next = current->next;
 
-	mapping_size = sizeof(t_header_info) + current->size;
-	munmap(current, mapping_size);
+	munmap(current, current->mapping_size);
+	return (true);
+}
+
+static std::size_t	count_zones(t_zone_type type)
+{
+	t_header_info	*header;
+	std::size_t	count;
+
+	header = g_first_header;
+	count = 0;
+	while (header != nullptr)
+	{
+		if (header->zone == header && header->type == type)
+			count++;
+
+		header = header->next;
+	}
+
+	return (count);
+}
+
+void	release_empty_zone(t_header_info *zone)
+{
+	t_header_info	*current;
+	t_header_info	*previous;
+
+	if (zone == nullptr || zone->type == LARGE || !zone->is_free)
+		return ;
+
+	if (zone->size != zone->mapping_size - sizeof(t_header_info)
+		|| count_zones(zone->type) <= 1)
+		return ;
+
+	current = g_first_header;
+	previous = nullptr;
+	while (current != nullptr && current != zone)
+	{
+		previous = current;
+		current = current->next;
+	}
+
+	if (current == nullptr)
+		return ;
+
+	if (previous == nullptr)
+		g_first_header = current->next;
+	else
+		previous->next = current->next;
+
+	munmap(current, current->mapping_size);
+}
+
+bool	resize_header_in_place(void *ptr, std::size_t size)
+{
+	t_header_info	*header;
+	t_header_info	*next;
+	std::size_t	aligned_size;
+	char			*end;
+
+	header = get_header(ptr);
+	aligned_size = align_size(size);
+	if (aligned_size == 0)
+		return (false);
+
+	if (header->size >= aligned_size)
+	{
+		if (header->type != LARGE)
+			split_header(header, aligned_size);
+
+		header->requested_size = size;
+		merge_free_headers();
+		return (true);
+	}
+
+	next = header->next;
+	end = reinterpret_cast<char *>(header + 1) + header->size;
+	if (header->type == LARGE || next == nullptr || !next->is_free
+		|| next->zone != header->zone
+		|| end != reinterpret_cast<char *>(next)
+		|| header->size + sizeof(t_header_info) + next->size < aligned_size)
+		return (false);
+
+	header->size += sizeof(t_header_info) + next->size;
+	header->next = next->next;
+	split_header(header, aligned_size);
+	header->requested_size = size;
 	return (true);
 }
 
@@ -195,9 +300,13 @@ extern "C" void	*malloc(std::size_t size) noexcept
 	if (size == 0)
 		return (nullptr);
 
+	lock_allocator();
 	aligned_size = align_size(size);
 	if (aligned_size == 0)
+	{
+		unlock_allocator();
 		return (nullptr);
+	}
 
 	type = get_zone_type(aligned_size);
 	header = find_free_header(aligned_size, type);
@@ -205,119 +314,16 @@ extern "C" void	*malloc(std::size_t size) noexcept
 		header = allocate_zone(aligned_size, type);
 
 	if (header == nullptr)
+	{
+		unlock_allocator();
 		return (nullptr);
+	}
 
 	if (type != LARGE)
 		split_header(header, aligned_size);
 
 	header->requested_size = size;
 	header->is_free = false;
+	unlock_allocator();
 	return (header + 1);
-}
-
-static void	write_text(const char *text)
-{
-	std::size_t	length;
-
-	length = 0;
-	while (text[length] != '\0')
-		length++;
-
-	write(STDOUT_FILENO, text, length);
-}
-
-static void	write_number(std::size_t number, const char *digits)
-{
-	char		buffer[32];
-	std::size_t	base;
-	std::size_t	i;
-
-	base = 0;
-	while (digits[base] != '\0')
-		base++;
-
-	i = sizeof(buffer);
-	if (number == 0)
-		buffer[--i] = '0';
-
-	while (number != 0)
-	{
-		buffer[--i] = digits[number % base];
-		number /= base;
-	}
-	write(STDOUT_FILENO, buffer + i, sizeof(buffer) - i);
-}
-
-static t_header_info	*next_header_by_address(t_zone_type type,
-	std::uintptr_t previous_address)
-{
-	t_header_info	*header;
-	t_header_info	*next;
-	std::uintptr_t	address;
-
-	header = g_first_header;
-	next = nullptr;
-	while (header != nullptr)
-	{
-		address = reinterpret_cast<std::uintptr_t>(header);
-		if (header->type == type && address > previous_address
-			&& (next == nullptr || address
-				< reinterpret_cast<std::uintptr_t>(next)))
-			next = header;
-
-		header = header->next;
-	}
-
-	return (next);
-}
-
-static std::size_t	show_zone_type(t_zone_type type, const char *name)
-{
-	t_header_info	*header;
-	std::uintptr_t	address;
-	std::uintptr_t	start;
-	std::size_t	total;
-
-	header = next_header_by_address(type, 0);
-	if (header == nullptr)
-		return (0);
-
-	write_text(name);
-	write_text(" : 0x");
-	write_number(reinterpret_cast<std::uintptr_t>(header), "0123456789ABCDEF");
-	write_text("\n");
-	total = 0;
-	while (header != nullptr)
-	{
-		address = reinterpret_cast<std::uintptr_t>(header);
-		if (!header->is_free)
-		{
-			start = reinterpret_cast<std::uintptr_t>(header + 1);
-			write_text("0x");
-			write_number(start, "0123456789ABCDEF");
-			write_text(" - 0x");
-			write_number(start + header->requested_size,
-				"0123456789ABCDEF");
-			write_text(" : ");
-			write_number(header->requested_size, "0123456789");
-			write_text(" bytes\n");
-			total += header->requested_size;
-		}
-
-		header = next_header_by_address(type, address);
-	}
-
-	return (total);
-}
-
-extern "C" void	show_alloc_mem() noexcept
-{
-	std::size_t	total;
-
-	total = show_zone_type(TINY, "TINY");
-	total += show_zone_type(SMALL, "SMALL");
-	total += show_zone_type(LARGE, "LARGE");
-	write_text("Total : ");
-	write_number(total, "0123456789");
-	write_text(" bytes\n");
 }

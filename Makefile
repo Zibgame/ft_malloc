@@ -26,7 +26,7 @@ test: $(TEST_NAME)
 
 $(TEST_NAME): $(TEST_SRC) $(LINK) include/malloc.h
 	$(CXX) $(INCLUDES) $(CXXFLAGS) $(TEST_SRC) -L. -lft_malloc \
-		-Wl,-rpath,'$$ORIGIN' -o $@
+		-Wl,-rpath,'$$ORIGIN' $(LDLIBS) -o $@
 
 $(LINK): $(NAME)
 	ln -sfn $(NAME) $(LINK)

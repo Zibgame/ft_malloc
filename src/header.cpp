@@ -19,9 +19,11 @@ void	*put_header(void *ptr, std::size_t size, t_zone_type type)
 	header_info = static_cast<t_header_info *>(ptr);
 	header_info->size = size;
 	header_info->requested_size = size;
+	header_info->mapping_size = sizeof(t_header_info) + size;
 	header_info->is_free = false;
 	header_info->type = type;
 	header_info->next = nullptr;
+	header_info->zone = header_info;
 	return (header_info + 1);
 }
 
@@ -60,7 +62,7 @@ void	merge_next_free_header(t_header_info *header)
 	if (next == nullptr || !header->is_free || !next->is_free)
 		return ;
 
-	if (header->type != next->type)
+	if (header->type != next->type || header->zone != next->zone)
 		return ;
 
 	end = reinterpret_cast<char *>(header + 1) + header->size;

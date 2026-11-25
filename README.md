@@ -10,7 +10,10 @@ page-backed memory obtained through `mmap`.
 - `TINY`, `SMALL`, and `LARGE` allocation classes
 - Preallocated `TINY` and `SMALL` zones with room for at least 100 blocks
 - Reuse and coalescing of adjacent free blocks
+- In-place `realloc` growth when the following block is available
 - Dedicated mappings for `LARGE` allocations
+- Release of excess empty shared zones
+- Thread-safe allocator state protected by a mutex
 - Allocation inspection through `show_alloc_mem()`
 - Overflow checks for size and page-rounding calculations
 
@@ -49,9 +52,9 @@ libft_malloc.so -> libft_malloc_<HOSTTYPE>.so
 make test
 ```
 
-The test suite checks alignment, allocation classes, `realloc` data
-preservation, zero-size behavior, more than 100 allocations per shared class,
-and the output path of `show_alloc_mem()`.
+The test suite checks alignment, allocation classes, in-place and moving
+`realloc`, data preservation, zero-size behavior, multiple shared zones,
+concurrent allocations from four threads, and `show_alloc_mem()`.
 
 The allocator can also be injected into another program:
 
@@ -70,5 +73,6 @@ void   show_alloc_mem() noexcept;
 
 ## Current scope
 
-The mandatory allocation behavior is implemented. Thread safety and extended
-debug output such as `show_alloc_mem_ex()` are not included yet.
+The mandatory allocation behavior and thread-safety bonus are implemented.
+Extended diagnostics such as `show_alloc_mem_ex()` and malloc debug environment
+variables are not included.

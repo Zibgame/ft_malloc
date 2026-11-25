@@ -29,12 +29,14 @@ extern "C" void	*realloc(void *ptr, std::size_t size) noexcept
 		return (nullptr);
 	}
 
+	lock_allocator();
 	old_size = get_header(ptr)->requested_size;
-	if (get_header_size(ptr) >= size)
+	if (resize_header_in_place(ptr, size))
 	{
-		get_header(ptr)->requested_size = size;
+		unlock_allocator();
 		return (ptr);
 	}
+	unlock_allocator();
 
 	new_ptr = malloc(size);
 	if (new_ptr == nullptr)
